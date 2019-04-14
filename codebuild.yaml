@@ -1,4 +1,4 @@
 steps:
-  - name 'gcr.io/cloud-builders/git'
+- name: 'gcr.io/cloud-builders/git'
   args: ['clone', 'https://source.developers.google.com/p/cr-lab-cfree-1002193620/r/github_cliffjumper_vscode']
   env: ['PROJECT_ROOT=github_cliffjumper_vscode']
