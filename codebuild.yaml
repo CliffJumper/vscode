@@ -4,4 +4,4 @@ steps:
   env: ['PROJECT_ROOT=github_cliffjumper_vscode']
 - name: 'gcr.io/cloud-builders/yarn'
   args: ['watch']
-  dir: 'github_cliffjumper_vscode']
+  dir: 'github_cliffjumper_vscode'
