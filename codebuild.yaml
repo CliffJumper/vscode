@@ -2,3 +2,6 @@ steps:
 - name: 'gcr.io/cloud-builders/git'
   args: ['clone', 'https://source.developers.google.com/p/cr-lab-cfree-1002193620/r/github_cliffjumper_vscode']
   env: ['PROJECT_ROOT=github_cliffjumper_vscode']
+- name: 'gcr.io/cloud-builders/yarn'
+  args: ['watch']
+  dir: 'github_cliffjumper_vscode']
