@@ -4,5 +4,5 @@ steps:
   env: ['PROJECT_ROOT=github_cliffjumper_vscode']
 - name: node:10.15.3
   entrypoint: yarn
-  args: ['']
+  args: ['watch']
   dir: 'github_cliffjumper_vscode'
