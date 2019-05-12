@@ -1,7 +1,19 @@
 steps:
-- name: 'gcr.io/cloud-builders/git'
-  args: ['clone', 'https://source.developers.google.com/p/cr-lab-cfree-1002193620/r/github_cliffjumper_vscode']
-  env: ['PROJECT_ROOT=github_cliffjumper_vscode']
-- name: node:10.15.6
-  entrypoint: yarn
-  dir: 'github_cliffjumper_vscode'
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/vscode_builder', '.']
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/$PROJECT_ID/vscode_builder']
+- name: 'gcr.io/$PROJECT_ID/vscode_builder'
+  args: ['git', 'clone', 'https://github.com/CliffJumper/vscode.git']
+- name: 'gcr.io/$PROJECT_ID/vscode_builder'
+  args: ['yarn']
+  dir: 'vscode'
+- name: 'gcr.io/$PROJECT_ID/vscode_builder'
+  args: ['yarn', 'run', 'gulp', 'vscode-linux-x64']
+  dir: 'vscode'
+- name: 'gcr.io/$PROJECT_ID/vscode_builder'
+  args: ['tar', 'czvf', 'VSCode-linux-x64.tar.bz2', 'VSCode-linux-x64']
+artifacts:
+  objects:
+    location: 'gs://vscode-builds/'
+    paths: ['VSCode-linux-x64.tar.bz2']
