@@ -12,7 +12,8 @@ import { IExtensionPointUser, ExtensionMessageCollector, ExtensionsRegistry } fr
 import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
 import { MenuId, MenuRegistry, ILocalizedString, IMenuItem } from 'vs/platform/actions/common/actions';
 import { URI } from 'vs/base/common/uri';
-import { IDisposable, dispose } from 'vs/base/common/lifecycle';
+import { DisposableStore } from 'vs/base/common/lifecycle';
+import { ThemeIcon } from 'vs/platform/theme/common/themeService';
 
 namespace schema {
 
@@ -39,12 +40,18 @@ namespace schema {
 			case 'menuBar/file': return MenuId.MenubarFileMenu;
 			case 'scm/title': return MenuId.SCMTitle;
 			case 'scm/sourceControl': return MenuId.SCMSourceControl;
-			case 'scm/resourceGroup/context': return MenuId.SCMResourceGroupContext;
 			case 'scm/resourceState/context': return MenuId.SCMResourceContext;
+			case 'scm/resourceFolder/context': return MenuId.SCMResourceFolderContext;
+			case 'scm/resourceGroup/context': return MenuId.SCMResourceGroupContext;
 			case 'scm/change/title': return MenuId.SCMChangeContext;
 			case 'statusBar/windowIndicator': return MenuId.StatusBarWindowIndicatorMenu;
 			case 'view/title': return MenuId.ViewTitle;
 			case 'view/item/context': return MenuId.ViewItemContext;
+			case 'comments/commentThread/title': return MenuId.CommentThreadTitle;
+			case 'comments/commentThread/context': return MenuId.CommentThreadActions;
+			case 'comments/comment/title': return MenuId.CommentTitle;
+			case 'comments/comment/context': return MenuId.CommentActions;
+			case 'extension/context': return MenuId.ExtensionContext;
 		}
 
 		return undefined;
@@ -109,7 +116,7 @@ namespace schema {
 		}
 	};
 
-	export const menusContribtion: IJSONSchema = {
+	export const menusContribution: IJSONSchema = {
 		description: localize('vscode.extension.contributes.menus', "Contributes menu items to the editor"),
 		type: 'object',
 		properties: {
@@ -182,7 +189,32 @@ namespace schema {
 				description: localize('view.itemContext', "The contributed view item context menu"),
 				type: 'array',
 				items: menuItem
-			}
+			},
+			'comments/commentThread/title': {
+				description: localize('commentThread.title', "The contributed comment thread title menu"),
+				type: 'array',
+				items: menuItem
+			},
+			'comments/commentThread/context': {
+				description: localize('commentThread.actions', "The contributed comment thread context menu, rendered as buttons below the comment editor"),
+				type: 'array',
+				items: menuItem
+			},
+			'comments/comment/title': {
+				description: localize('comment.title', "The contributed comment title menu"),
+				type: 'array',
+				items: menuItem
+			},
+			'comments/comment/context': {
+				description: localize('comment.actions', "The contributed comment context menu, rendered as buttons below the comment editor"),
+				type: 'array',
+				items: menuItem
+			},
+			'extension/context': {
+				description: localize('menus.extensionContext', "The extension context menu"),
+				type: 'array',
+				items: menuItem
+			},
 		}
 	};
 
@@ -191,6 +223,7 @@ namespace schema {
 	export interface IUserFriendlyCommand {
 		command: string;
 		title: string | ILocalizedString;
+		enablement?: string;
 		category?: string | ILocalizedString;
 		icon?: IUserFriendlyIcon;
 	}
@@ -207,6 +240,10 @@ namespace schema {
 			return false;
 		}
 		if (!isValidLocalizedString(command.title, collector, 'title')) {
+			return false;
+		}
+		if (command.enablement && typeof command.enablement !== 'string') {
+			collector.error(localize('optstring', "property `{0}` can be omitted or must be of type `string`", 'precondition'));
 			return false;
 		}
 		if (command.category && !isValidLocalizedString(command.category, collector, 'category')) {
@@ -262,6 +299,10 @@ namespace schema {
 				description: localize('vscode.extension.contributes.commandType.category', '(Optional) Category string by the command is grouped in the UI'),
 				type: 'string'
 			},
+			enablement: {
+				description: localize('vscode.extension.contributes.commandType.precondition', '(Optional) Condition which must be true to enable the command'),
+				type: 'string'
+			},
 			icon: {
 				description: localize('vscode.extension.contributes.commandType.icon', '(Optional) Icon which is used to represent the command in the UI. Either a file path or a themable configuration'),
 				anyOf: [{
@@ -296,25 +337,28 @@ namespace schema {
 	};
 }
 
-let _commandRegistrations: IDisposable[] = [];
+const _commandRegistrations = new DisposableStore();
 
-ExtensionsRegistry.registerExtensionPoint<schema.IUserFriendlyCommand | schema.IUserFriendlyCommand[]>({
+export const commandsExtensionPoint = ExtensionsRegistry.registerExtensionPoint<schema.IUserFriendlyCommand | schema.IUserFriendlyCommand[]>({
 	extensionPoint: 'commands',
 	jsonSchema: schema.commandsContribution
-}).setHandler(extensions => {
+});
 
-	function handleCommand(userFriendlyCommand: schema.IUserFriendlyCommand, extension: IExtensionPointUser<any>, disposables: IDisposable[]) {
+commandsExtensionPoint.setHandler(extensions => {
+
+	function handleCommand(userFriendlyCommand: schema.IUserFriendlyCommand, extension: IExtensionPointUser<any>) {
 
 		if (!schema.isValidCommand(userFriendlyCommand, extension.collector)) {
 			return;
 		}
 
-		const { icon, category, title, command } = userFriendlyCommand;
+		const { icon, enablement, category, title, command } = userFriendlyCommand;
 
-		let absoluteIcon: { dark: URI; light?: URI; } | undefined;
+		let absoluteIcon: { dark: URI; light?: URI; } | ThemeIcon | undefined;
 		if (icon) {
 			if (typeof icon === 'string') {
-				absoluteIcon = { dark: resources.joinPath(extension.description.extensionLocation, icon) };
+				absoluteIcon = ThemeIcon.fromString(icon) || { dark: resources.joinPath(extension.description.extensionLocation, icon) };
+
 			} else {
 				absoluteIcon = {
 					dark: resources.joinPath(extension.description.extensionLocation, icon.dark),
@@ -326,34 +370,40 @@ ExtensionsRegistry.registerExtensionPoint<schema.IUserFriendlyCommand | schema.I
 		if (MenuRegistry.getCommand(command)) {
 			extension.collector.info(localize('dup', "Command `{0}` appears multiple times in the `commands` section.", userFriendlyCommand.command));
 		}
-		const registration = MenuRegistry.addCommand({ id: command, title, category, iconLocation: absoluteIcon });
-		disposables.push(registration);
+		const registration = MenuRegistry.addCommand({
+			id: command,
+			title,
+			category,
+			precondition: ContextKeyExpr.deserialize(enablement),
+			icon: absoluteIcon
+		});
+		_commandRegistrations.add(registration);
 	}
 
 	// remove all previous command registrations
-	_commandRegistrations = dispose(_commandRegistrations);
+	_commandRegistrations.clear();
 
-	for (let extension of extensions) {
+	for (const extension of extensions) {
 		const { value } = extension;
-		if (Array.isArray<schema.IUserFriendlyCommand>(value)) {
-			for (let command of value) {
-				handleCommand(command, extension, _commandRegistrations);
+		if (Array.isArray(value)) {
+			for (const command of value) {
+				handleCommand(command, extension);
 			}
 		} else {
-			handleCommand(value, extension, _commandRegistrations);
+			handleCommand(value, extension);
 		}
 	}
 });
 
-let _menuRegistrations: IDisposable[] = [];
+const _menuRegistrations = new DisposableStore();
 
 ExtensionsRegistry.registerExtensionPoint<{ [loc: string]: schema.IUserFriendlyMenuItem[] }>({
 	extensionPoint: 'menus',
-	jsonSchema: schema.menusContribtion
+	jsonSchema: schema.menusContribution
 }).setHandler(extensions => {
 
 	// remove all previous menu registrations
-	_menuRegistrations = dispose(_menuRegistrations);
+	_menuRegistrations.clear();
 
 	for (let extension of extensions) {
 		const { value, collector } = extension;
@@ -408,7 +458,7 @@ ExtensionsRegistry.registerExtensionPoint<{ [loc: string]: schema.IUserFriendlyM
 					order,
 					when: ContextKeyExpr.deserialize(item.when)
 				} as IMenuItem);
-				_menuRegistrations.push(registration);
+				_menuRegistrations.add(registration);
 			}
 		});
 	}

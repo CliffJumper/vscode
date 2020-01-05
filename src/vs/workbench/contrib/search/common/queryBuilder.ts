@@ -151,16 +151,18 @@ export class QueryBuilder {
 	private commonQuery(folderResources: uri[] = [], options: ICommonQueryBuilderOptions = {}): ICommonQueryProps<uri> {
 		let includeSearchPathsInfo: ISearchPathsInfo = {};
 		if (options.includePattern) {
+			const includePattern = normalizeSlashes(options.includePattern);
 			includeSearchPathsInfo = options.expandPatterns ?
-				this.parseSearchPaths(options.includePattern) :
-				{ pattern: patternListToIExpression(options.includePattern) };
+				this.parseSearchPaths(includePattern) :
+				{ pattern: patternListToIExpression(includePattern) };
 		}
 
 		let excludeSearchPathsInfo: ISearchPathsInfo = {};
 		if (options.excludePattern) {
+			const excludePattern = normalizeSlashes(options.excludePattern);
 			excludeSearchPathsInfo = options.expandPatterns ?
-				this.parseSearchPaths(options.excludePattern) :
-				{ pattern: patternListToIExpression(options.excludePattern) };
+				this.parseSearchPaths(excludePattern) :
+				{ pattern: patternListToIExpression(excludePattern) };
 		}
 
 		// Build folderQueries from searchPaths, if given, otherwise folderResources
@@ -274,7 +276,7 @@ export class QueryBuilder {
 	 * Split search paths (./ or ../ or absolute paths in the includePatterns) into absolute paths and globs applied to those paths
 	 */
 	private expandSearchPathPatterns(searchPaths: string[]): ISearchPathPattern[] {
-		if (this.workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY || !searchPaths || !searchPaths.length) {
+		if (!searchPaths || !searchPaths.length) {
 			// No workspace => ignore search paths
 			return [];
 		}
@@ -288,7 +290,7 @@ export class QueryBuilder {
 					globPortion = normalizeGlobPattern(globPortion);
 				}
 
-				// One pathPortion to multiple expanded search paths (eg duplicate matching workspace folders)
+				// One pathPortion to multiple expanded search paths (e.g. duplicate matching workspace folders)
 				const oneExpanded = this.expandOneSearchPath(pathPortion);
 
 				// Expanded search paths to multiple resolved patterns (with ** and without)

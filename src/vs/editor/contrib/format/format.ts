@@ -8,9 +8,9 @@ import { isNonEmptyArray } from 'vs/base/common/arrays';
 import { CancellationToken, CancellationTokenSource } from 'vs/base/common/cancellation';
 import { illegalArgument, onUnexpectedExternalError } from 'vs/base/common/errors';
 import { URI } from 'vs/base/common/uri';
-import { CodeEditorStateFlag, EditorState, EditorStateCancellationTokenSource, TextModelCancellationTokenSource } from 'vs/editor/browser/core/editorState';
+import { CodeEditorStateFlag, EditorStateCancellationTokenSource, TextModelCancellationTokenSource } from 'vs/editor/browser/core/editorState';
 import { IActiveCodeEditor, isCodeEditor } from 'vs/editor/browser/editorBrowser';
-import { registerLanguageCommand, ServicesAccessor } from 'vs/editor/browser/editorExtensions';
+import { ServicesAccessor } from 'vs/editor/browser/editorExtensions';
 import { Position } from 'vs/editor/common/core/position';
 import { Range } from 'vs/editor/common/core/range';
 import { Selection } from 'vs/editor/common/core/selection';
@@ -25,6 +25,8 @@ import { ExtensionIdentifier } from 'vs/platform/extensions/common/extensions';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IDisposable } from 'vs/base/common/lifecycle';
 import { LinkedList } from 'vs/base/common/linkedList';
+import { CommandsRegistry } from 'vs/platform/commands/common/commands';
+import { assertType } from 'vs/base/common/types';
 
 export function alertFormattingEdits(edits: ISingleEditOperation[]): void {
 
@@ -143,28 +145,31 @@ export async function formatDocumentRangeWithProvider(
 	const workerService = accessor.get(IEditorWorkerService);
 
 	let model: ITextModel;
-	let validate: () => boolean;
+	let cts: CancellationTokenSource;
 	if (isCodeEditor(editorOrModel)) {
 		model = editorOrModel.getModel();
-		const state = new EditorState(editorOrModel, CodeEditorStateFlag.Value | CodeEditorStateFlag.Position);
-		validate = () => state.validate(editorOrModel);
+		cts = new EditorStateCancellationTokenSource(editorOrModel, CodeEditorStateFlag.Value | CodeEditorStateFlag.Position, token);
 	} else {
 		model = editorOrModel;
-		const versionNow = editorOrModel.getVersionId();
-		validate = () => versionNow === editorOrModel.getVersionId();
+		cts = new TextModelCancellationTokenSource(editorOrModel, token);
 	}
 
-	const rawEdits = await provider.provideDocumentRangeFormattingEdits(
-		model,
-		range,
-		model.getFormattingOptions(),
-		token
-	);
+	let edits: TextEdit[] | undefined;
+	try {
+		const rawEdits = await provider.provideDocumentRangeFormattingEdits(
+			model,
+			range,
+			model.getFormattingOptions(),
+			cts.token
+		);
+		edits = await workerService.computeMoreMinimalEdits(model.uri, rawEdits);
 
-	const edits = await workerService.computeMoreMinimalEdits(model.uri, rawEdits);
+		if (cts.token.isCancellationRequested) {
+			return true;
+		}
 
-	if (!validate()) {
-		return true;
+	} finally {
+		cts.dispose();
 	}
 
 	if (!edits || edits.length === 0) {
@@ -237,16 +242,22 @@ export async function formatDocumentWithProvider(
 		cts = new TextModelCancellationTokenSource(editorOrModel, token);
 	}
 
-	const rawEdits = await provider.provideDocumentFormattingEdits(
-		model,
-		model.getFormattingOptions(),
-		cts.token
-	);
+	let edits: TextEdit[] | undefined;
+	try {
+		const rawEdits = await provider.provideDocumentFormattingEdits(
+			model,
+			model.getFormattingOptions(),
+			cts.token
+		);
 
-	const edits = await workerService.computeMoreMinimalEdits(model.uri, rawEdits);
+		edits = await workerService.computeMoreMinimalEdits(model.uri, rawEdits);
 
-	if (cts.token.isCancellationRequested) {
-		return true;
+		if (cts.token.isCancellationRequested) {
+			return true;
+		}
+
+	} finally {
+		cts.dispose();
 	}
 
 	if (!edits || edits.length === 0) {
@@ -345,11 +356,11 @@ export function getOnTypeFormattingEdits(
 	});
 }
 
-registerLanguageCommand('_executeFormatRangeProvider', function (accessor, args) {
-	const { resource, range, options } = args;
-	if (!(resource instanceof URI) || !Range.isIRange(range)) {
-		throw illegalArgument();
-	}
+CommandsRegistry.registerCommand('_executeFormatRangeProvider', function (accessor, ...args) {
+	const [resource, range, options] = args;
+	assertType(URI.isUri(resource));
+	assertType(Range.isIRange(range));
+
 	const model = accessor.get(IModelService).getModel(resource);
 	if (!model) {
 		throw illegalArgument('resource');
@@ -357,11 +368,10 @@ registerLanguageCommand('_executeFormatRangeProvider', function (accessor, args)
 	return getDocumentRangeFormattingEditsUntilResult(accessor.get(IEditorWorkerService), model, Range.lift(range), options, CancellationToken.None);
 });
 
-registerLanguageCommand('_executeFormatDocumentProvider', function (accessor, args) {
-	const { resource, options } = args;
-	if (!(resource instanceof URI)) {
-		throw illegalArgument('resource');
-	}
+CommandsRegistry.registerCommand('_executeFormatDocumentProvider', function (accessor, ...args) {
+	const [resource, options] = args;
+	assertType(URI.isUri(resource));
+
 	const model = accessor.get(IModelService).getModel(resource);
 	if (!model) {
 		throw illegalArgument('resource');
@@ -370,11 +380,12 @@ registerLanguageCommand('_executeFormatDocumentProvider', function (accessor, ar
 	return getDocumentFormattingEditsUntilResult(accessor.get(IEditorWorkerService), model, options, CancellationToken.None);
 });
 
-registerLanguageCommand('_executeFormatOnTypeProvider', function (accessor, args) {
-	const { resource, position, ch, options } = args;
-	if (!(resource instanceof URI) || !Position.isIPosition(position) || typeof ch !== 'string') {
-		throw illegalArgument();
-	}
+CommandsRegistry.registerCommand('_executeFormatOnTypeProvider', function (accessor, ...args) {
+	const [resource, position, ch, options] = args;
+	assertType(URI.isUri(resource));
+	assertType(Position.isIPosition(position));
+	assertType(typeof ch === 'string');
+
 	const model = accessor.get(IModelService).getModel(resource);
 	if (!model) {
 		throw illegalArgument('resource');
