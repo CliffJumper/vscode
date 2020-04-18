@@ -20,6 +20,7 @@ import { selectBorder } from 'vs/platform/theme/common/colorRegistry';
 import { IContextViewService } from 'vs/platform/contextview/browser/contextView';
 import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
 import { IDisposable, dispose } from 'vs/base/common/lifecycle';
+import { ADD_CONFIGURATION_ID } from 'vs/workbench/contrib/debug/browser/debugCommands';
 
 const $ = dom.$;
 
@@ -161,15 +162,15 @@ export class StartDebugActionViewItem implements IActionViewItem {
 		let lastGroup: string | undefined;
 		const disabledIdxs: number[] = [];
 		manager.getAllConfigurations().forEach(({ launch, name, presentation }) => {
-			if (name === manager.selectedConfiguration.name && launch === manager.selectedConfiguration.launch) {
-				this.selected = this.options.length;
-			}
 			if (lastGroup !== presentation?.group) {
 				lastGroup = presentation?.group;
 				if (this.options.length) {
 					this.options.push({ label: StartDebugActionViewItem.SEPARATOR, handler: undefined });
 					disabledIdxs.push(this.options.length - 1);
 				}
+			}
+			if (name === manager.selectedConfiguration.name && launch === manager.selectedConfiguration.launch) {
+				this.selected = this.options.length;
 			}
 
 			const label = inWorkspace ? `${name} (${launch.name})` : name;
@@ -187,7 +188,7 @@ export class StartDebugActionViewItem implements IActionViewItem {
 			const label = inWorkspace ? nls.localize("addConfigTo", "Add Config ({0})...", l.name) : nls.localize('addConfiguration', "Add Configuration...");
 			this.options.push({
 				label, handler: () => {
-					this.commandService.executeCommand('debug.addConfiguration', l.uri.toString());
+					this.commandService.executeCommand(ADD_CONFIGURATION_ID, l.uri.toString());
 					return false;
 				}
 			});

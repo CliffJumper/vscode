@@ -83,6 +83,8 @@ export interface IConfigurationValue<T> {
 	readonly workspace?: { value?: T, override?: T };
 	readonly workspaceFolder?: { value?: T, override?: T };
 	readonly memory?: { value?: T, override?: T };
+
+	readonly overrideIdentifiers?: string[];
 }
 
 export interface IConfigurationService {
@@ -263,8 +265,12 @@ export function addToValueTree(settingsTreeRoot: any, key: string, value: any, c
 		curr = obj;
 	}
 
-	if (typeof curr === 'object') {
-		curr[last] = value; // workaround https://github.com/Microsoft/vscode/issues/13606
+	if (typeof curr === 'object' && curr !== null) {
+		try {
+			curr[last] = value; // workaround https://github.com/Microsoft/vscode/issues/13606
+		} catch (e) {
+			conflictReporter(`Ignoring ${key} as ${segments.join('.')} is ${JSON.stringify(curr)}`);
+		}
 	} else {
 		conflictReporter(`Ignoring ${key} as ${segments.join('.')} is ${JSON.stringify(curr)}`);
 	}

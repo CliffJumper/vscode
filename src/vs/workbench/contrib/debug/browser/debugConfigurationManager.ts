@@ -11,9 +11,8 @@ import * as objects from 'vs/base/common/objects';
 import { URI as uri } from 'vs/base/common/uri';
 import * as resources from 'vs/base/common/resources';
 import { IJSONSchema } from 'vs/base/common/jsonSchema';
-import * as editorCommon from 'vs/editor/common/editorCommon';
 import { ITextModel } from 'vs/editor/common/model';
-import { IEditor } from 'vs/workbench/common/editor';
+import { IEditorPane } from 'vs/workbench/common/editor';
 import { IStorageService, StorageScope } from 'vs/platform/storage/common/storage';
 import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
@@ -38,6 +37,7 @@ import { withUndefinedAsNull } from 'vs/base/common/types';
 import { sequence } from 'vs/base/common/async';
 import { IHistoryService } from 'vs/workbench/services/history/common/history';
 import { first } from 'vs/base/common/arrays';
+import { getVisibleAndSorted } from 'vs/workbench/contrib/debug/common/debugUtils';
 
 const jsonRegistry = Registry.as<IJSONContributionRegistry>(JSONExtensions.JSONContribution);
 jsonRegistry.registerSchema(launchSchemaId, launchSchema);
@@ -162,6 +162,15 @@ export class ConfigurationManager implements IConfigurationManager {
 		return Promise.resolve(undefined);
 	}
 
+	getDebuggerLabel(session: IDebugSession): string | undefined {
+		const dbgr = this.getDebugger(session.configuration.type);
+		if (dbgr) {
+			return dbgr.label;
+		}
+
+		return undefined;
+	}
+
 	get onDidRegisterDebugger(): Event<void> {
 		return this._onDidRegisterDebugger.event;
 	}
@@ -235,36 +244,13 @@ export class ConfigurationManager implements IConfigurationManager {
 		for (let l of this.launches) {
 			for (let name of l.getConfigurationNames()) {
 				const config = l.getConfiguration(name) || l.getCompound(name);
-				if (config && !config.presentation?.hidden) {
+				if (config) {
 					all.push({ launch: l, name, presentation: config.presentation });
 				}
 			}
 		}
 
-		return all.sort((first, second) => {
-			if (!first.presentation) {
-				return 1;
-			}
-			if (!second.presentation) {
-				return -1;
-			}
-			if (!first.presentation.group) {
-				return 1;
-			}
-			if (!second.presentation.group) {
-				return -1;
-			}
-			if (first.presentation.group !== second.presentation.group) {
-				return first.presentation.group.localeCompare(second.presentation.group);
-			}
-			if (typeof first.presentation.order !== 'number') {
-				return 1;
-			}
-			if (typeof second.presentation.order !== 'number') {
-				return -1;
-			}
-			return first.presentation.order - second.presentation.order;
-		});
+		return getVisibleAndSorted(all);
 	}
 
 	private registerListeners(): void {
@@ -360,7 +346,7 @@ export class ConfigurationManager implements IConfigurationManager {
 	private setCompoundSchemaValues(): void {
 		const compoundConfigurationsSchema = (<IJSONSchema>launchSchema.properties!['compounds'].items).properties!['configurations'];
 		const launchNames = this.launches.map(l =>
-			l.getConfigurationNames(false)).reduce((first, second) => first.concat(second), []);
+			l.getConfigurationNames(true)).reduce((first, second) => first.concat(second), []);
 		(<IJSONSchema>compoundConfigurationsSchema.items).oneOf![0].enum = launchNames;
 		(<IJSONSchema>compoundConfigurationsSchema.items).oneOf![1].properties!.name.enum = launchNames;
 
@@ -456,15 +442,8 @@ export class ConfigurationManager implements IConfigurationManager {
 		return this.debuggers.filter(dbg => strings.equalsIgnoreCase(dbg.type, type)).pop();
 	}
 
-	getDebuggerLabelsForEditor(editor: editorCommon.IEditor | undefined): string[] {
-		if (isCodeEditor(editor)) {
-			const model = editor.getModel();
-			const language = model ? model.getLanguageIdentifier().language : undefined;
-
-			return this.debuggers.filter(a => language && a.languages && a.languages.indexOf(language) >= 0).map(d => d.label);
-		}
-
-		return [];
+	isDebuggerInterestedInLanguage(language: string): boolean {
+		return this.debuggers.filter(a => language && a.languages && a.languages.indexOf(language) >= 0).length > 0;
 	}
 
 	async guessDebugger(type?: string): Promise<Debugger | undefined> {
@@ -473,10 +452,10 @@ export class ConfigurationManager implements IConfigurationManager {
 			return Promise.resolve(adapter);
 		}
 
-		const activeTextEditorWidget = this.editorService.activeTextEditorWidget;
+		const activeTextEditorControl = this.editorService.activeTextEditorControl;
 		let candidates: Debugger[] | undefined;
-		if (isCodeEditor(activeTextEditorWidget)) {
-			const model = activeTextEditorWidget.getModel();
+		if (isCodeEditor(activeTextEditorControl)) {
+			const model = activeTextEditorControl.getModel();
 			const language = model ? model.getLanguageIdentifier().language : undefined;
 			const adapters = this.debuggers.filter(a => language && a.languages && a.languages.indexOf(language) >= 0);
 			if (adapters.length === 1) {
@@ -544,23 +523,24 @@ abstract class AbstractLaunch {
 		return config.compounds.filter(compound => compound.name === name).pop();
 	}
 
-	getConfigurationNames(includeCompounds = true): string[] {
+	getConfigurationNames(ignoreCompoundsAndPresentation = false): string[] {
 		const config = this.getConfig();
 		if (!config || (!Array.isArray(config.configurations) && !Array.isArray(config.compounds))) {
 			return [];
 		} else {
-			const names: string[] = [];
+			const configurations: (IConfig | ICompound)[] = [];
 			if (config.configurations) {
-				names.push(...config.configurations.filter(cfg => cfg && typeof cfg.name === 'string').map(cfg => cfg.name));
-			}
-			if (includeCompounds && config.compounds) {
-				if (config.compounds) {
-					names.push(...config.compounds.filter(compound => typeof compound.name === 'string' && compound.configurations && compound.configurations.length)
-						.map(compound => compound.name));
-				}
+				configurations.push(...config.configurations.filter(cfg => cfg && typeof cfg.name === 'string'));
 			}
 
-			return names;
+			if (ignoreCompoundsAndPresentation) {
+				return configurations.map(c => c.name);
+			}
+
+			if (config.compounds) {
+				configurations.push(...config.compounds.filter(compound => typeof compound.name === 'string' && compound.configurations && compound.configurations.length));
+			}
+			return getVisibleAndSorted(configurations).map(c => c.name);
 		}
 	}
 
@@ -604,7 +584,7 @@ class Launch extends AbstractLaunch implements ILaunch {
 		return this.configurationService.inspect<IGlobalConfig>('launch', { resource: this.workspace.uri }).workspaceFolderValue;
 	}
 
-	async openConfigFile(sideBySide: boolean, preserveFocus: boolean, type?: string, token?: CancellationToken): Promise<{ editor: IEditor | null, created: boolean }> {
+	async openConfigFile(sideBySide: boolean, preserveFocus: boolean, type?: string, token?: CancellationToken): Promise<{ editor: IEditorPane | null, created: boolean }> {
 		const resource = this.uri;
 		let created = false;
 		let content = '';
@@ -684,7 +664,7 @@ class WorkspaceLaunch extends AbstractLaunch implements ILaunch {
 		return this.configurationService.inspect<IGlobalConfig>('launch').workspaceValue;
 	}
 
-	async openConfigFile(sideBySide: boolean, preserveFocus: boolean): Promise<{ editor: IEditor | null, created: boolean }> {
+	async openConfigFile(sideBySide: boolean, preserveFocus: boolean): Promise<{ editor: IEditorPane | null, created: boolean }> {
 
 		const editor = await this.editorService.openEditor({
 			resource: this.contextService.getWorkspace().configuration!,
@@ -727,8 +707,8 @@ class UserLaunch extends AbstractLaunch implements ILaunch {
 		return this.configurationService.inspect<IGlobalConfig>('launch').userValue;
 	}
 
-	async openConfigFile(_: boolean, preserveFocus: boolean): Promise<{ editor: IEditor | null, created: boolean }> {
-		const editor = await this.preferencesService.openGlobalSettings(false, { preserveFocus });
+	async openConfigFile(_: boolean, preserveFocus: boolean): Promise<{ editor: IEditorPane | null, created: boolean }> {
+		const editor = await this.preferencesService.openGlobalSettings(true, { preserveFocus });
 		return ({
 			editor: withUndefinedAsNull(editor),
 			created: false

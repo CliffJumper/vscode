@@ -13,6 +13,8 @@ import { INewScrollPosition, ScrollEvent, Scrollable, ScrollbarVisibility } from
 export class VerticalScrollbar extends AbstractScrollbar {
 
 	constructor(scrollable: Scrollable, options: ScrollableElementResolvedOptions, host: ScrollbarHost) {
+		const scrollDimensions = scrollable.getScrollDimensions();
+		const scrollPosition = scrollable.getCurrentScrollPosition();
 		super({
 			lazyRender: options.lazyRender,
 			host: host,
@@ -20,7 +22,10 @@ export class VerticalScrollbar extends AbstractScrollbar {
 				(options.verticalHasArrows ? options.arrowSize : 0),
 				(options.vertical === ScrollbarVisibility.Hidden ? 0 : options.verticalScrollbarSize),
 				// give priority to vertical scroll bar over horizontal and let it scroll all the way to the bottom
-				0
+				0,
+				scrollDimensions.height,
+				scrollDimensions.scrollHeight,
+				scrollPosition.scrollTop
 			),
 			visibility: options.vertical,
 			extraScrollbarClassName: 'vertical',
@@ -32,7 +37,7 @@ export class VerticalScrollbar extends AbstractScrollbar {
 			let scrollbarDelta = (options.verticalScrollbarSize - ARROW_IMG_SIZE) / 2;
 
 			this._createArrow({
-				className: 'up-arrow',
+				className: 'scra codicon codicon-triangle-up',
 				top: arrowDelta,
 				left: scrollbarDelta,
 				bottom: undefined,
@@ -43,7 +48,7 @@ export class VerticalScrollbar extends AbstractScrollbar {
 			});
 
 			this._createArrow({
-				className: 'down-arrow',
+				className: 'scra codicon codicon-triangle-down',
 				top: undefined,
 				left: scrollbarDelta,
 				bottom: arrowDelta,
@@ -86,6 +91,10 @@ export class VerticalScrollbar extends AbstractScrollbar {
 
 	protected _sliderOrthogonalMousePosition(e: ISimplifiedMouseEvent): number {
 		return e.posx;
+	}
+
+	protected _updateScrollbarSize(size: number): void {
+		this.slider.setWidth(size);
 	}
 
 	public writeScrollPosition(target: INewScrollPosition, scrollPosition: number): void {

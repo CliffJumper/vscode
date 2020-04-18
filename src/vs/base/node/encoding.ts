@@ -22,9 +22,10 @@ export const UTF16be_BOM = [0xFE, 0xFF];
 export const UTF16le_BOM = [0xFF, 0xFE];
 export const UTF8_BOM = [0xEF, 0xBB, 0xBF];
 
-const ZERO_BYTE_DETECTION_BUFFER_MAX_LEN = 512; // number of bytes to look at to decide about a file being binary or not
-const NO_GUESS_BUFFER_MAX_LEN = 512; 			// when not auto guessing the encoding, small number of bytes are enough
-const AUTO_GUESS_BUFFER_MAX_LEN = 512 * 8; 		// with auto guessing we want a lot more content to be read for guessing
+const ZERO_BYTE_DETECTION_BUFFER_MAX_LEN = 512; 	// number of bytes to look at to decide about a file being binary or not
+const NO_ENCODING_GUESS_MIN_BYTES = 512; 			// when not auto guessing the encoding, small number of bytes are enough
+const AUTO_ENCODING_GUESS_MIN_BYTES = 512 * 8; 		// with auto guessing we want a lot more content to be read for guessing
+const AUTO_ENCODING_GUESS_MAX_BYTES = 512 * 128; 	// set an upper limit for the number of bytes we pass on to jschardet
 
 export interface IDecodeStreamOptions {
 	guessEncoding: boolean;
@@ -40,7 +41,7 @@ export interface IDecodeStreamResult {
 
 export function toDecodeStream(readable: Readable, options: IDecodeStreamOptions): Promise<IDecodeStreamResult> {
 	if (!options.minBytesRequiredForDetection) {
-		options.minBytesRequiredForDetection = options.guessEncoding ? AUTO_GUESS_BUFFER_MAX_LEN : NO_GUESS_BUFFER_MAX_LEN;
+		options.minBytesRequiredForDetection = options.guessEncoding ? AUTO_ENCODING_GUESS_MIN_BYTES : NO_ENCODING_GUESS_MIN_BYTES;
 	}
 
 	return new Promise<IDecodeStreamResult>((resolve, reject) => {
@@ -51,7 +52,7 @@ export function toDecodeStream(readable: Readable, options: IDecodeStreamOptions
 			private bufferedChunks: Buffer[] = [];
 			private bytesBuffered = 0;
 
-			_write(chunk: Buffer, encoding: string, callback: (error: Error | null) => void): void {
+			_write(chunk: Buffer, encoding: string, callback: (error: Error | null | undefined) => void): void {
 				if (!Buffer.isBuffer(chunk)) {
 					return callback(new Error('toDecodeStream(): data must be a buffer'));
 				}
@@ -83,7 +84,7 @@ export function toDecodeStream(readable: Readable, options: IDecodeStreamOptions
 				}
 			}
 
-			_startDecodeStream(callback: (error: Error | null) => void): void {
+			_startDecodeStream(callback: (error: Error | null | undefined) => void): void {
 
 				// detect encoding from buffer
 				this.decodeStreamPromise = Promise.resolve(detectEncodingFromBuffer({
@@ -137,14 +138,6 @@ export function toDecodeStream(readable: Readable, options: IDecodeStreamOptions
 	});
 }
 
-export function decode(buffer: Buffer, encoding: string): string {
-	return iconv.decode(buffer, toNodeEncoding(encoding));
-}
-
-export function encode(content: string | Buffer, encoding: string, options?: { addBOM?: boolean }): Buffer {
-	return iconv.encode(content as string /* TODO report into upstream typings */, toNodeEncoding(encoding), options);
-}
-
 export function encodingExists(encoding: string): boolean {
 	return iconv.encodingExists(toNodeEncoding(encoding));
 }
@@ -157,7 +150,7 @@ export function encodeStream(encoding: string, options?: { addBOM?: boolean }): 
 	return iconv.encodeStream(toNodeEncoding(encoding), options);
 }
 
-function toNodeEncoding(enc: string | null): string {
+export function toNodeEncoding(enc: string | null): string {
 	if (enc === UTF8_with_bom || enc === null) {
 		return UTF8; // iconv does not distinguish UTF 8 with or without BOM, so we need to help it
 	}
@@ -210,7 +203,7 @@ const IGNORE_ENCODINGS = ['ascii', 'utf-16', 'utf-32'];
 async function guessEncodingByBuffer(buffer: Buffer): Promise<string | null> {
 	const jschardet = await import('jschardet');
 
-	const guessed = jschardet.detect(buffer);
+	const guessed = jschardet.detect(buffer.slice(0, AUTO_ENCODING_GUESS_MAX_BYTES)); // ensure to limit buffer for guessing due to https://github.com/aadsm/jschardet/issues/53
 	if (!guessed || !guessed.encoding) {
 		return null;
 	}

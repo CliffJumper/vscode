@@ -16,7 +16,7 @@ import { CursorChangeReason, ICursorPositionChangedEvent } from 'vs/editor/commo
 import { Position } from 'vs/editor/common/core/position';
 import { Range } from 'vs/editor/common/core/range';
 import { Selection } from 'vs/editor/common/core/selection';
-import * as editorCommon from 'vs/editor/common/editorCommon';
+import { IEditorContribution } from 'vs/editor/common/editorCommon';
 import { EditorContextKeys } from 'vs/editor/common/editorContextKeys';
 import { IModelDeltaDecoration, ITextModel, OverviewRulerLane, TrackedRangeStickiness } from 'vs/editor/common/model';
 import { ModelDecorationOptions } from 'vs/editor/common/model/textModel';
@@ -401,12 +401,13 @@ class WordHighlighter {
 	private renderDecorations(): void {
 		this.renderDecorationsTimer = -1;
 		let decorations: IModelDeltaDecoration[] = [];
-		for (let i = 0, len = this.workerRequestValue.length; i < len; i++) {
-			let info = this.workerRequestValue[i];
-			decorations.push({
-				range: info.range,
-				options: WordHighlighter._getDecorationOptions(info.kind)
-			});
+		for (const info of this.workerRequestValue) {
+			if (info.range) {
+				decorations.push({
+					range: info.range,
+					options: WordHighlighter._getDecorationOptions(info.kind)
+				});
+			}
 		}
 
 		this._decorationIds = this.editor.deltaDecorations(this._decorationIds, decorations);
@@ -456,7 +457,7 @@ class WordHighlighter {
 	}
 }
 
-class WordHighlighterContribution extends Disposable implements editorCommon.IEditorContribution {
+class WordHighlighterContribution extends Disposable implements IEditorContribution {
 
 	public static readonly ID = 'editor.contrib.wordHighlighter';
 
